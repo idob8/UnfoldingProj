@@ -3,7 +3,6 @@ import numpy as np
 import heapq
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
-import networkx as nx
 #from scipy.spatial import ConvexHull
 import heapq
 
@@ -77,50 +76,31 @@ def prim_mst_directed(vertices, edges, edge_weights):
     return mst
 
 
-def flatten_faces(centers, mst):
-    G = nx.Graph()
-    for weight, u, v in mst.get_edges():
-        G.add_edge(u, v, weight=weight)
-    
-    pos = nx.spring_layout(G, seed=42)
-    return pos
+vertices = [
+    [1, 1, 1],
+    [-1, -1, 1],
+    [-1, 1, -1],
+    [1, -1, -1]
+]
 
-def draw_flattened_mesh(mesh, flattened_positions):
-    plt.figure(figsize=(10, 8))
-    
-    # Draw edges of the mesh
-    for face in mesh.faces:
-        for i in range(len(face)):
-            v1 = face[i]
-            v2 = face[(i + 1) % len(face)]
-            plt.plot([mesh.vertices[v1][0], mesh.vertices[v2][0]], [mesh.vertices[v1][1], mesh.vertices[v2][1]], 'k-')
+faces = [
+    [0, 1, 2],
+    [0, 1, 3],
+    [0, 2, 3],
+    [1, 2, 3]
+]
 
-    plt.title('Flattened 2D Mesh')
-    plt.xlabel('X')
-    plt.ylabel('Y')
-    plt.grid(True)
-    plt.show()
+mesh = Mesh(vertices, faces)
 
+tree = Tree()
+tree.add_edge(0, 1, 1.0)
+tree.add_edge(0, 2, 1.0)
+tree.add_edge(0, 3, 1.0)
 
-# Example usage
-vertices = [(0, 0, 0), (1, 0, 0), (0, 1, 0), (1, 1, 0)]
-faces = [(0, 1, 2), (1, 2, 3)]
+mesh.unfold_mesh_along_tree(tree)
 
-#mesh = Mesh(vertices, faces)
+print("Visualizing original 3D mesh:")
+mesh.visualize_mesh()
 
-mesh = Mesh()
-mesh.read_off(r"C:\Users\ido.b\Documents\Technion\semester H\DigitalGeometryProcessing\HW2\hw2_data\sphere_s0.off")
-# Example weights matrix between faces
-
-
-# Compute MST
-dual_vertices, dual_edges = mesh.get_dual_directed_graph()
-mst = prim_mst_directed(dual_vertices, dual_edges,mesh.calculate_edge_weights())
-print(mst.edges)
-print(mst.nodes)
-# Flatten faces using the MST
-flattened_positions = flatten_faces(mesh.face_centers, mst)
-
-# Draw flattened mesh
-draw_flattened_mesh(mesh, flattened_positions)
-
+print("Visualizing flattened 2D mesh:")
+mesh.visualize_flattened_mesh()
