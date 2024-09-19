@@ -5,9 +5,16 @@ from collections import defaultdict
 from Tree import Tree
 import heapq
 import random
+from scipy.sparse import csr_matrix
+from scipy.sparse.linalg import spsolve
+from scipy.sparse.linalg import eigs
 xzero = 0.0001 
 
-class Polygon:
+def compute_triangle_area(coords):
+    v1, v2, v3 = coords
+    return 0.5 * np.linalg.norm(np.cross(v2 - v1, v3 - v1))
+
+class Face:
     def __init__(self, vertex_indices, weight=1.0, center=None, normal=None):
         self.vertex_indices = vertex_indices  
         self.weight = weight  
@@ -24,11 +31,10 @@ class Polygon:
 
 class Mesh:
     def __init__(self, vertices=None, faces=None):
-        # vertices is a list of 3D points (x, y, z)
-        # faces is a list of tuples, each tuple contains indices of the vertices that form a face
-        self.vertices = vertices
-        self.faces = [Polygon(face) for face in faces] if faces else []  # List of Polygon objects
-        self.initilize_mesh()
+        self.vertices = np.array(vertices) if vertices is not None else None
+        self.faces = [Face(face) for face in faces] if faces else []
+        if self.vertices is not None and self.faces:
+            self.initialize_mesh()
 
     def read_off(self, file_path):
         with open(file_path, 'r') as file:
@@ -36,16 +42,21 @@ class Mesh:
             if lines[0].strip() != 'OFF':
                 raise ValueError("Not a valid OFF file")
             n_verts, n_faces, _ = map(int, lines[1].strip().split())
-            self.vertices = [list(map(float, line.strip().split())) for line in lines[2:2+n_verts]]
-            self.faces = [Polygon(list(map(int, line.strip().split()[1:]))) for line in lines[2+n_verts:2+n_verts+n_faces]]
-        self.initilize_mesh()
+            self.vertices = np.loadtxt(lines[2:2+n_verts], dtype=float)
+            self.faces = [Face(list(map(int, line.strip().split()[1:]))) for line in lines[2+n_verts:2+n_verts+n_faces]]
+        self.initialize_mesh()
         
-    def initilize_mesh(self):
-        self.calculate_face_centers()
-        self.calculate_face_normals()
+    def initialize_mesh(self):
         self.face_vertices = [[self.vertices[idx] for idx in face.vertex_indices] for face in self.faces]
         self.poly3d = Poly3DCollection(self.face_vertices, facecolors='white', edgecolors='black', alpha=0.8)
-    
+        self.update_properties()
+
+    def update_properties(self):
+        self.calculate_face_centers()
+        self.calculate_face_normals()
+        self.calculate_genus()
+
+
     def write_off(self, file_path):
         with open(file_path, 'w') as file:
             file.write("OFF\n")
@@ -55,7 +66,20 @@ class Mesh:
             for face in self.faces:
                 file.write(f"{len(face)} {' '.join(map(str, face.vertex_indices))}\n")
 
-
+    def calculate_genus(self):
+        V = len(self.vertices)
+        F = len(self.faces)
+        # Calculate the number of edges
+        edges = set()
+        for face in self.faces:
+            for i in range(len(face)):
+                edge = tuple(sorted([face.vertex_indices[i], face.vertex_indices[(i+1) % len(face.vertex_indices)]]))
+                edges.add(edge)
+        E = len(edges)
+        # Euler characteristic
+        euler_characteristic = V - E + F
+        self.genus = (2 - euler_characteristic) // 2
+        
     def calculate_face_centers(self):
         for face in self.faces:
             coords = np.array([self.vertices[i] for i in face])
@@ -104,11 +128,17 @@ class Mesh:
        ax.set_xlabel('X')
        ax.set_ylabel('Y')
        ax.set_zlabel('Z')
-       # Auto scaling the axes
-       ax.auto_scale_xyz([v[0] for v in self.vertices],
-                          [v[1] for v in self.vertices],
-                          [v[2] for v in self.vertices])
-
+       # Set equal aspect ratio
+       x = self.vertices[:,0]
+       y = self.vertices[:,1]
+       z = self.vertices[:,2]
+       max_range = np.array([x.max()-x.min(), y.max()-y.min(), z.max()-z.min()]).max() / 2.0
+       mid_x = (x.max()+x.min()) * 0.5
+       mid_y = (y.max()+y.min()) * 0.5
+       mid_z = (z.max()+z.min()) * 0.5
+       ax.set_xlim(mid_x - max_range, mid_x + max_range)
+       ax.set_ylim(mid_y - max_range, mid_y + max_range)
+       ax.set_zlim(mid_z - max_range, mid_z + max_range)
        plt.title('Mesh Visualization')
        plt.show()
 
@@ -132,3 +162,90 @@ class Mesh:
             raise ValueError("Custom weights must be provided and match the number of faces.")
         for face, weight in zip(self.faces, custom_weights):
             face.weight = weight if weight != 0 else xzero 
+
+
+    def conformalized_mean_curvature_flow(self, n_iterations, step_factor):
+        """
+        Apply Conformalized Mean Curvature Flow to the mesh.
+        :param n_iterations: Number of iterations to perform
+        :param step_factor: Step factor (t in the equation)
+        """
+        if self.genus != 0:
+            print(f"Warning: This mesh has genus {self.genus}. The cMCF algorithm is designed for genus-zero surfaces.")
+        
+        for i in range(n_iterations):
+            M = self._compute_mass_matrix()
+            L = self._compute_stiffness_matrix()
+            # Solve the equation: (M - t*L) * V_{n+1} = M * V_n
+            A = M - step_factor * L
+            b = M @ self.vertices
+            new_vertices = spsolve(A, b)
+            # Check for NaN or inf values
+            if np.any(np.isnan(new_vertices)) or np.any(np.isinf(new_vertices)):
+                print(f"Warning: NaN or inf values detected at iteration {i} of conformalized mean curvature flow")
+                break
+            self.vertices = new_vertices
+            self.shift_and_normalize()
+        # Recalculate mesh properties
+        self.initialize_mesh()
+    
+    def _compute_mean_curvature(self):
+        # Compute mean curvature vector using the cotangent Laplacian
+        H = spsolve(self._compute_mass_matrix, self._compute_stiffness_matrix @ self.vertices)
+        mean_curvature_vector = H
+        return np.linalg.norm(H, axis=1) / 2
+
+    def shift_and_normalize(self):
+        center = np.mean(self.vertices, axis=0)
+        self.vertices -= center
+        scale = np.max(np.linalg.norm(self.vertices, axis=1))
+        self.vertices /= scale
+
+    def _compute_mass_matrix(self):
+        # Compute the mass matrix
+        num_vertices = len(self.vertices)
+        row, col, data = [], [], []
+        for face in self.faces:
+            v_indices = face.vertex_indices
+            coords = np.array([self.vertices[i] for i in v_indices])
+            area = compute_triangle_area(coords)
+            for i in v_indices:
+                row.append(i)
+                col.append(i)
+                data.append(area / 3)  # Barycentric mass distribution
+        return csr_matrix((data, (row, col)), shape=(num_vertices, num_vertices))
+
+    def _compute_stiffness_matrix(self):
+        # Compute the stiffness matrix
+        num_vertices = len(self.vertices)
+        row, col, data = [], [], []
+        for face in self.faces:
+            v_indices = face.vertex_indices
+            coords = np.array([self.vertices[i] for i in v_indices])
+            cot_weights = self._compute_cotangent_weights(coords)
+            for i in range(3):
+                j = (i + 1) % 3
+                k = (i + 2) % 3
+                weight = cot_weights[k]
+                if np.isfinite(weight) and abs(weight) > 1e-10:  # Avoid very small weights
+                    row.extend([v_indices[i], v_indices[j], v_indices[i], v_indices[j]])
+                    col.extend([v_indices[j], v_indices[i], v_indices[i], v_indices[j]])
+                    data.extend([weight, weight, -weight, -weight])
+        return csr_matrix((data, (row, col)), shape=(num_vertices, num_vertices))
+    
+    def _compute_cotangent_weights(self, coords):
+        # Compute cotangent weights for a triangle
+        v1, v2, v3 = coords
+        e1, e2, e3 = v2 - v3, v3 - v1, v1 - v2
+        def safe_cot(x, y):
+            cross = np.cross(x, y)
+            norm_cross = np.linalg.norm(cross)
+            if norm_cross < 1e-10:
+                return 0.0
+            return np.clip(np.dot(x, y) / norm_cross, -1e3, 1e3)
+        return [
+            0.5 * safe_cot(e2, -e3),
+            0.5 * safe_cot(e3, -e1),
+            0.5 * safe_cot(e1, -e2)
+        ]
+
