@@ -4,6 +4,9 @@ from collections import defaultdict
 from Tree import Tree
 import heapq
 from Mesh import Mesh
+import PolygonCollision
+from PolygonCollision.shape import Shape
+import random
 
 class Unfolder:
     def __init__(self,mesh):
@@ -114,3 +117,102 @@ class Unfolder:
         plt.ylabel('Y')
         plt.title('Unfolded Mesh')
         plt.show()
+
+    def count_collisions(self):
+        collision_count = 0
+        
+        for i in range(len(self.polygons_2d)):
+            for j in range(i + 1, len(self.polygons_2d)):
+                polygon1 = Shape(vertices=self.polygons_2d[i])
+                polygon2 = Shape(vertices=self.polygons_2d[j])
+                if polygon1.collide(polygon2):
+                    collision_count += 1
+                    
+        return collision_count
+
+    def steepest_edge_unfolder(self):
+        ## Initialize empty list T
+        cut_tree = []
+
+        ## Generate random normalized 3D vector c
+        c = np.array([random.uniform(-1, 1) for _ in range(3)])
+        c = c / np.linalg.norm(c)  # Normalize the vector
+
+        ## Find the top vertex with respect to c
+        top_vertex_index = max(range(len(self.mesh.vertices)), key=lambda i: np.dot(self.mesh.vertices[i], c))
+
+        ## Process each vertex except the top
+        for i, vertex in enumerate(self.mesh.vertices):
+            if i == top_vertex_index:
+                continue
+
+            ## Find the edge with highest dot product with c
+            max_dot_product = float('-inf')
+            steepest_edge = None
+
+            for face in self.mesh.faces:
+                if i in face.vertex_indices:
+                    for v in face.vertex_indices:
+                        if v != i:
+                            edge = np.array(self.mesh.vertices[v]) - np.array(vertex)
+                            edge_normalized = edge / np.linalg.norm(edge)
+                            dot_product = np.dot(edge_normalized, c)
+                            if dot_product > max_dot_product:
+                                max_dot_product = dot_product
+                                steepest_edge = set([i, v])
+
+            if steepest_edge:
+                cut_tree.append(steepest_edge)
+
+        return self.cut_tree_to_unfold_tree(cut_tree)
+
+    def cut_tree_to_unfold_tree(self, cut_edges):
+        # Helper function to get neighboring faces
+        def get_neighbors(face_idx):
+            neighbors = []
+            #shared_edge = list(set(face.vertex_indices) & set(parent_face.vertex_indices))
+            for other_face_idx, other_face in enumerate(self.mesh.faces):
+                shared_edge = set(self.mesh.faces[face_idx].vertex_indices) & set(other_face.vertex_indices)
+                if (len(shared_edge) == 2 and shared_edge not in cut_edges):
+                    neighbors.append(other_face_idx)
+            return list(set(neighbors))
+
+        # Create adjacency list
+        adjacency_list = {i: get_neighbors(i) for i in range(len(self.mesh.faces))}
+
+        # Initialize tree and tracking variables
+        face_tree = Tree()
+        inserted_faces = set()
+        lost_nodes = set()
+
+        # Start with a random root face
+        root_face = random.choice(range(len(self.mesh.faces)))
+        face_tree.root = root_face
+        inserted_faces.add(root_face)
+
+        # Queue for BFS
+        queue = [root_face]
+
+        # Main tree construction
+        while queue:
+            current_face = queue.pop(0)
+            for neighbor in adjacency_list[current_face]:
+                if neighbor not in inserted_faces:
+                    #face_tree.create_node(str(neighbor), neighbor, parent=current_face)
+                    face_tree.add_edge(current_face, neighbor, 1)
+                    inserted_faces.add(neighbor)
+                    queue.append(neighbor)
+
+        # Identify lost nodes
+        lost_nodes = set(range(len(self.mesh.faces))) - inserted_faces
+
+        # Connect lost nodes
+        for lost_node in lost_nodes:
+            possible_parents = [node for node in adjacency_list[lost_node] if node in inserted_faces]
+            if possible_parents:
+                parent = random.choice(possible_parents)
+                #face_tree.create_node(str(lost_node), lost_node, parent=parent)
+                face_tree.add_edge(parent, lost_node, 1)
+                inserted_faces.add(lost_node)
+
+        return face_tree
