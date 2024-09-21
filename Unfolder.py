@@ -56,14 +56,14 @@ class Unfolder:
             
             # Place first two vertices along x-axis
             x1 = np.linalg.norm(np.array(vb) - np.array(va))
-            self.polygons_2d[face_index] = [(0, 0), (x1, 0)]
+            self.polygons_2d[face_index] = {a: (0, 0), b: (x1, 0)}
             
             # Calculate position of third vertex
             vec1 = np.array(vb) - np.array(va)
             vec2 = np.array(vc) - np.array(va)
             x2 = np.dot(vec1, vec2) / np.linalg.norm(vec1)
             y2 = np.sqrt(np.dot(vec2, vec2) - x2*x2)
-            self.polygons_2d[face_index].append((x2, y2))
+            self.polygons_2d[face_index][c] = (x2, y2)
         else:
             # This face shares an edge with its parent. Use that information to place it.
             parent_face = self.mesh.faces[parent_index]
@@ -74,7 +74,7 @@ class Unfolder:
             
             # Get 2D coordinates of shared edge in parent face
             parent_2d = self.polygons_2d[parent_index]
-            edge_2d = [parent_2d[parent_face.vertex_indices.index(v)] for v in shared_edge]
+            edge_2d = [parent_2d[v] for v in shared_edge]
             
             # Find the vertex of this face that's not in the shared edge
             new_vertex = [v for v in face.vertex_indices if v not in shared_edge][0]
@@ -94,9 +94,13 @@ class Unfolder:
             normal = normal / np.linalg.norm(normal)
             
             new_point = np.array(edge_2d[0]) + (proj/edge_len)*edge_2d_vec + height*normal
+
+            if triangles_overlap(list(parent_2d.values()), edge_2d + [tuple(new_point)]):
+                new_point = np.array(edge_2d[0]) + (proj/edge_len)*edge_2d_vec - height*normal
             
             # Store the 2D coordinates
-            self.polygons_2d[face_index] = edge_2d + [tuple(new_point)]
+            self.polygons_2d[face_index] = {shared_edge[0]: edge_2d[0], 
+                                            shared_edge[1]: edge_2d[1], new_vertex: tuple(new_point)}
 
         # Recursively unfold children
         for child in tree.get_children(face_index):
@@ -106,7 +110,7 @@ class Unfolder:
     def visualize_unfolded_mesh(self):
         fig, ax = plt.subplots(figsize=(10, 10))
         for face_index, vertices_2d in self.polygons_2d.items():
-            polygon = plt.Polygon(vertices_2d, fill=None, edgecolor='black')
+            polygon = plt.Polygon(list(vertices_2d.values()), fill=None, edgecolor='black')
             ax.add_patch(polygon)
             # centroid = np.mean(vertices_2d, axis=0)
             # ax.text(centroid[0], centroid[1], str(face_index), ha='center', va='center')
@@ -120,14 +124,10 @@ class Unfolder:
 
     def count_collisions(self):
         collision_count = 0
-        
         for i in range(len(self.polygons_2d)):
             for j in range(i + 1, len(self.polygons_2d)):
-                polygon1 = Shape(vertices=self.polygons_2d[i])
-                polygon2 = Shape(vertices=self.polygons_2d[j])
-                if polygon1.collide(polygon2):
-                    collision_count += 1
-                    
+                if(triangles_overlap(list(self.polygons_2d[i].values()), list(self.polygons_2d[j].values()))):
+                    collision_count += 1            
         return collision_count
 
     def steepest_edge_unfolder(self):
@@ -216,3 +216,66 @@ class Unfolder:
                 inserted_faces.add(lost_node)
 
         return face_tree
+
+'''def triangles_overlap(triangle1_vertices, triangle2_vertices):
+    polygon1 = Shape(vertices=triangle1_vertices)
+    polygon2 = Shape(vertices=triangle2_vertices)
+    if polygon1.collide(polygon2):
+        return True
+    return False'''
+
+
+def triangles_overlap(triangle1, triangle2):
+    def orientation(p, q, r):
+        return (q[1] - p[1]) * (r[0] - q[0]) - (q[0] - p[0]) * (r[1] - q[1])
+
+    def line_intersect(p1, q1, p2, q2):
+        o1 = orientation(p1, q1, p2)
+        o2 = orientation(p1, q1, q2)
+        o3 = orientation(p2, q2, p1)
+        o4 = orientation(p2, q2, q1)
+        
+        if o1 * o2 < 0 and o3 * o4 < 0:
+            return True
+        return False
+
+    def point_inside_triangle(p, triangle):
+        a, b, c = triangle
+        area = abs(orientation(a, b, c))
+        area1 = abs(orientation(p, b, c))
+        area2 = abs(orientation(a, p, c))
+        area3 = abs(orientation(a, b, p))
+        return abs(area - (area1 + area2 + area3)) < 1e-5
+
+    # Check if triangles are identical
+    if set(triangle1) == set(triangle2):
+        return True
+
+    # Count shared vertices
+    shared_vertices = len(set(triangle1) & set(triangle2))
+
+    # If only one side is shared (two vertices), check if the third point overlaps
+    if shared_vertices == 2:
+        for point in triangle1:
+            if point not in triangle2:
+                return point_inside_triangle(point, triangle2)
+        for point in triangle2:
+            if point not in triangle1:
+                return point_inside_triangle(point, triangle1)
+        return False  # Only one side is shared, and the third point doesn't overlap
+
+    # Check if any point of one triangle is inside the other
+    for point in triangle1:
+        if point_inside_triangle(point, triangle2) and point not in triangle2:
+            return True
+    for point in triangle2:
+        if point_inside_triangle(point, triangle1) and point not in triangle1:
+            return True
+
+    # Check if any edges intersect
+    for i in range(3):
+        for j in range(3):
+            if line_intersect(triangle1[i], triangle1[(i+1)%3], triangle2[j], triangle2[(j+1)%3]):
+                return True
+
+    return False
