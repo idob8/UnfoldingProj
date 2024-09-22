@@ -4,6 +4,9 @@ from collections import defaultdict
 from Tree import Tree
 import heapq
 from Mesh import Mesh
+import PolygonCollision
+from PolygonCollision.shape import Shape
+import random
 
 class Unfolder:
     def __init__(self,mesh):
@@ -53,14 +56,14 @@ class Unfolder:
             
             # Place first two vertices along x-axis
             x1 = np.linalg.norm(np.array(vb) - np.array(va))
-            self.polygons_2d[face_index] = [(0, 0), (x1, 0)]
+            self.polygons_2d[face_index] = {a: (0, 0), b: (x1, 0)}
             
             # Calculate position of third vertex
             vec1 = np.array(vb) - np.array(va)
             vec2 = np.array(vc) - np.array(va)
             x2 = np.dot(vec1, vec2) / np.linalg.norm(vec1)
             y2 = np.sqrt(np.dot(vec2, vec2) - x2*x2)
-            self.polygons_2d[face_index].append((x2, y2))
+            self.polygons_2d[face_index][c] = (x2, y2)
         else:
             # This face shares an edge with its parent. Use that information to place it.
             parent_face = self.mesh.faces[parent_index]
@@ -71,7 +74,7 @@ class Unfolder:
             
             # Get 2D coordinates of shared edge in parent face
             parent_2d = self.polygons_2d[parent_index]
-            edge_2d = [parent_2d[parent_face.vertex_indices.index(v)] for v in shared_edge]
+            edge_2d = [parent_2d[v] for v in shared_edge]
             
             # Find the vertex of this face that's not in the shared edge
             new_vertex = [v for v in face.vertex_indices if v not in shared_edge][0]
@@ -91,9 +94,13 @@ class Unfolder:
             normal = normal / np.linalg.norm(normal)
             
             new_point = np.array(edge_2d[0]) + (proj/edge_len)*edge_2d_vec + height*normal
+
+            if triangles_overlap(list(parent_2d.values()), edge_2d + [tuple(new_point)]):
+                new_point = np.array(edge_2d[0]) + (proj/edge_len)*edge_2d_vec - height*normal
             
             # Store the 2D coordinates
-            self.polygons_2d[face_index] = edge_2d + [tuple(new_point)]
+            self.polygons_2d[face_index] = {shared_edge[0]: edge_2d[0], 
+                                            shared_edge[1]: edge_2d[1], new_vertex: tuple(new_point)}
 
         # Recursively unfold children
         for child in tree.get_children(face_index):
@@ -103,7 +110,7 @@ class Unfolder:
     def visualize_unfolded_mesh(self):
         fig, ax = plt.subplots(figsize=(10, 10))
         for face_index, vertices_2d in self.polygons_2d.items():
-            polygon = plt.Polygon(vertices_2d, fill=None, edgecolor='black')
+            polygon = plt.Polygon(list(vertices_2d.values()), fill=None, edgecolor='black')
             ax.add_patch(polygon)
             # centroid = np.mean(vertices_2d, axis=0)
             # ax.text(centroid[0], centroid[1], str(face_index), ha='center', va='center')
@@ -114,3 +121,161 @@ class Unfolder:
         plt.ylabel('Y')
         plt.title('Unfolded Mesh')
         plt.show()
+
+    def count_collisions(self):
+        collision_count = 0
+        for i in range(len(self.polygons_2d)):
+            for j in range(i + 1, len(self.polygons_2d)):
+                if(triangles_overlap(list(self.polygons_2d[i].values()), list(self.polygons_2d[j].values()))):
+                    collision_count += 1            
+        return collision_count
+
+    def steepest_edge_unfolder(self):
+        ## Initialize empty list T
+        cut_tree = []
+
+        ## Generate random normalized 3D vector c
+        c = np.array([random.uniform(-1, 1) for _ in range(3)])
+        c = c / np.linalg.norm(c)  # Normalize the vector
+
+        ## Find the top vertex with respect to c
+        top_vertex_index = max(range(len(self.mesh.vertices)), key=lambda i: np.dot(self.mesh.vertices[i], c))
+
+        ## Process each vertex except the top
+        for i, vertex in enumerate(self.mesh.vertices):
+            if i == top_vertex_index:
+                continue
+
+            ## Find the edge with highest dot product with c
+            max_dot_product = float('-inf')
+            steepest_edge = None
+
+            for face in self.mesh.faces:
+                if i in face.vertex_indices:
+                    for v in face.vertex_indices:
+                        if v != i:
+                            edge = np.array(self.mesh.vertices[v]) - np.array(vertex)
+                            edge_normalized = edge / np.linalg.norm(edge)
+                            dot_product = np.dot(edge_normalized, c)
+                            if dot_product > max_dot_product:
+                                max_dot_product = dot_product
+                                steepest_edge = set([i, v])
+
+            if steepest_edge:
+                cut_tree.append(steepest_edge)
+
+        return self.cut_tree_to_unfold_tree(cut_tree)
+
+    def cut_tree_to_unfold_tree(self, cut_edges):
+        # Helper function to get neighboring faces
+        def get_neighbors(face_idx):
+            neighbors = []
+            #shared_edge = list(set(face.vertex_indices) & set(parent_face.vertex_indices))
+            for other_face_idx, other_face in enumerate(self.mesh.faces):
+                shared_edge = set(self.mesh.faces[face_idx].vertex_indices) & set(other_face.vertex_indices)
+                if (len(shared_edge) == 2 and shared_edge not in cut_edges):
+                    neighbors.append(other_face_idx)
+            return list(set(neighbors))
+
+        # Create adjacency list
+        adjacency_list = {i: get_neighbors(i) for i in range(len(self.mesh.faces))}
+
+        # Initialize tree and tracking variables
+        face_tree = Tree()
+        inserted_faces = set()
+        lost_nodes = set()
+
+        # Start with a random root face
+        root_face = random.choice(range(len(self.mesh.faces)))
+        face_tree.root = root_face
+        inserted_faces.add(root_face)
+
+        # Queue for BFS
+        queue = [root_face]
+
+        # Main tree construction
+        while queue:
+            current_face = queue.pop(0)
+            for neighbor in adjacency_list[current_face]:
+                if neighbor not in inserted_faces:
+                    #face_tree.create_node(str(neighbor), neighbor, parent=current_face)
+                    face_tree.add_edge(current_face, neighbor, 1)
+                    inserted_faces.add(neighbor)
+                    queue.append(neighbor)
+
+        # Identify lost nodes
+        lost_nodes = set(range(len(self.mesh.faces))) - inserted_faces
+
+        # Connect lost nodes
+        for lost_node in lost_nodes:
+            possible_parents = [node for node in adjacency_list[lost_node] if node in inserted_faces]
+            if possible_parents:
+                parent = random.choice(possible_parents)
+                #face_tree.create_node(str(lost_node), lost_node, parent=parent)
+                face_tree.add_edge(parent, lost_node, 1)
+                inserted_faces.add(lost_node)
+
+        return face_tree
+
+'''def triangles_overlap(triangle1_vertices, triangle2_vertices):
+    polygon1 = Shape(vertices=triangle1_vertices)
+    polygon2 = Shape(vertices=triangle2_vertices)
+    if polygon1.collide(polygon2):
+        return True
+    return False'''
+
+
+def triangles_overlap(triangle1, triangle2):
+    def orientation(p, q, r):
+        return (q[1] - p[1]) * (r[0] - q[0]) - (q[0] - p[0]) * (r[1] - q[1])
+
+    def line_intersect(p1, q1, p2, q2):
+        o1 = orientation(p1, q1, p2)
+        o2 = orientation(p1, q1, q2)
+        o3 = orientation(p2, q2, p1)
+        o4 = orientation(p2, q2, q1)
+        
+        if o1 * o2 < 0 and o3 * o4 < 0:
+            return True
+        return False
+
+    def point_inside_triangle(p, triangle):
+        a, b, c = triangle
+        area = abs(orientation(a, b, c))
+        area1 = abs(orientation(p, b, c))
+        area2 = abs(orientation(a, p, c))
+        area3 = abs(orientation(a, b, p))
+        return abs(area - (area1 + area2 + area3)) < 1e-5
+
+    # Check if triangles are identical
+    if set(triangle1) == set(triangle2):
+        return True
+
+    # Count shared vertices
+    shared_vertices = len(set(triangle1) & set(triangle2))
+
+    # If only one side is shared (two vertices), check if the third point overlaps
+    if shared_vertices == 2:
+        for point in triangle1:
+            if point not in triangle2:
+                return point_inside_triangle(point, triangle2)
+        for point in triangle2:
+            if point not in triangle1:
+                return point_inside_triangle(point, triangle1)
+        return False  # Only one side is shared, and the third point doesn't overlap
+
+    # Check if any point of one triangle is inside the other
+    for point in triangle1:
+        if point_inside_triangle(point, triangle2) and point not in triangle2:
+            return True
+    for point in triangle2:
+        if point_inside_triangle(point, triangle1) and point not in triangle1:
+            return True
+
+    # Check if any edges intersect
+    for i in range(3):
+        for j in range(3):
+            if line_intersect(triangle1[i], triangle1[(i+1)%3], triangle2[j], triangle2[(j+1)%3]):
+                return True
+
+    return False
