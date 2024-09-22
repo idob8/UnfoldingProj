@@ -5,7 +5,7 @@ from collections import defaultdict
 from Tree import Tree
 import heapq
 import random
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix,lil_matrix
 from scipy.sparse.linalg import spsolve
 from scipy.sparse.linalg import eigs
 xzero = 0.0001 
@@ -34,7 +34,7 @@ class Mesh:
         self.vertices = np.array(vertices) if vertices is not None else None
         self.faces = [Face(face) for face in faces] if faces else []
         if self.vertices is not None and self.faces:
-            self.initialize_mesh()
+            self.update_properties()
 
     def read_off(self, file_path):
         with open(file_path, 'r') as file:
@@ -44,14 +44,12 @@ class Mesh:
             n_verts, n_faces, _ = map(int, lines[1].strip().split())
             self.vertices = np.loadtxt(lines[2:2+n_verts], dtype=float)
             self.faces = [Face(list(map(int, line.strip().split()[1:]))) for line in lines[2+n_verts:2+n_verts+n_faces]]
-        self.initialize_mesh()
-        
-    def initialize_mesh(self):
-        self.face_vertices = [[self.vertices[idx] for idx in face.vertex_indices] for face in self.faces]
-        self.poly3d = Poly3DCollection(self.face_vertices, facecolors='white', edgecolors='black', alpha=0.8)
         self.update_properties()
+        
 
     def update_properties(self):
+        self.face_vertices = [[self.vertices[idx] for idx in face.vertex_indices] for face in self.faces]
+        self.poly3d = Poly3DCollection(self.face_vertices, facecolors='white', edgecolors='black', alpha=0.8)
         self.calculate_face_centers()
         self.calculate_face_normals()
         self.calculate_genus()
@@ -119,7 +117,6 @@ class Mesh:
                     weight = weight_i / weight_j
                     edge_weights.append(((i, j), weight))
         return edge_weights
-
    
     def visualize(self):
        fig = plt.figure(figsize=(10, 10))
@@ -172,29 +169,17 @@ class Mesh:
         """
         if self.genus != 0:
             print(f"Warning: This mesh has genus {self.genus}. The cMCF algorithm is designed for genus-zero surfaces.")
-        
+        L = self._compute_stiffness_matrix()
         for i in range(n_iterations):
             M = self._compute_mass_matrix()
-            L = self._compute_stiffness_matrix()
             # Solve the equation: (M - t*L) * V_{n+1} = M * V_n
             A = M - step_factor * L
             b = M @ self.vertices
             new_vertices = spsolve(A, b)
-            # Check for NaN or inf values
-            if np.any(np.isnan(new_vertices)) or np.any(np.isinf(new_vertices)):
-                print(f"Warning: NaN or inf values detected at iteration {i} of conformalized mean curvature flow")
-                break
             self.vertices = new_vertices
             self.shift_and_normalize()
-        # Recalculate mesh properties
-        self.initialize_mesh()
+        self.update_properties()
     
-    def _compute_mean_curvature(self):
-        # Compute mean curvature vector using the cotangent Laplacian
-        H = spsolve(self._compute_mass_matrix, self._compute_stiffness_matrix @ self.vertices)
-        mean_curvature_vector = H
-        return np.linalg.norm(H, axis=1) / 2
-
     def shift_and_normalize(self):
         center = np.mean(self.vertices, axis=0)
         self.vertices -= center
@@ -202,7 +187,6 @@ class Mesh:
         self.vertices /= scale
 
     def _compute_mass_matrix(self):
-        # Compute the mass matrix
         num_vertices = len(self.vertices)
         row, col, data = [], [], []
         for face in self.faces:
@@ -216,7 +200,6 @@ class Mesh:
         return csr_matrix((data, (row, col)), shape=(num_vertices, num_vertices))
 
     def _compute_stiffness_matrix(self):
-        # Compute the stiffness matrix
         num_vertices = len(self.vertices)
         row, col, data = [], [], []
         for face in self.faces:
@@ -248,4 +231,5 @@ class Mesh:
             0.5 * safe_cot(e3, -e1),
             0.5 * safe_cot(e1, -e2)
         ]
-
+        
+    
