@@ -46,24 +46,24 @@ class Polygon2D:
         poly2 = list(self.polygons[face2_index].values())
         
         # Check if polygons share an edge
-        edges1 = set(frozenset([tuple(poly1[i]), tuple(poly1[(i+1)%len(poly1)])]) for i in range(len(poly1)))
-        edges2 = set(frozenset([tuple(poly2[i]), tuple(poly2[(i+1)%len(poly2)])]) for i in range(len(poly2)))
-        shared_edges = edges1.intersection(edges2)
+        # edges1 = set(frozenset([tuple(poly1[i]), tuple(poly1[(i+1)%len(poly1)])]) for i in range(len(poly1)))
+        # edges2 = set(frozenset([tuple(poly2[i]), tuple(poly2[(i+1)%len(poly2)])]) for i in range(len(poly2)))
+        # shared_edges = edges1.intersection(edges2)
 
-        if shared_edges:
+        # if shared_edges:
             # If they share an edge, check if they overlap
-            return self.check_overlap(poly1, poly2)
+        return self.check_overlap(poly1, poly2)
     
         # If no shared edge, use Separating Axis Theorem
-        return self.separating_axis_theorem(poly1, poly2)
+        # return self.separating_axis_theorem(poly1, poly2)
     
     def check_overlap(self, poly1, poly2):
         for point in poly1:
             if self.point_inside_polygon(point, poly2):
                 return True
-        for point in poly2:
-            if self.point_inside_polygon(point, poly1):
-                return True
+        # for point in poly2:
+        #     if self.point_inside_polygon(point, poly1):
+        #         return True
         return False
 
     def point_inside_polygon(self, point, polygon):
