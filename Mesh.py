@@ -8,6 +8,7 @@ import random
 from scipy.sparse import csr_matrix,lil_matrix
 from scipy.sparse.linalg import spsolve
 from scipy.sparse.linalg import eigs
+from scipy.spatial.transform import Rotation
 xzero = 0.0001 
 
 def compute_triangle_area(coords):
@@ -15,11 +16,12 @@ def compute_triangle_area(coords):
     return 0.5 * np.linalg.norm(np.cross(v2 - v1, v3 - v1))
 
 class Face:
-    def __init__(self, vertex_indices, weight=1.0, center=None, normal=None):
+    def __init__(self, vertex_indices, weight=1.0, center=None, normal=None, area =None):
         self.vertex_indices = vertex_indices  
         self.weight = weight  
         self.center = center
         self.normal = normal
+        self.area = area
 
     def __iter__(self):
         # iteration over vertex_indices
@@ -51,9 +53,10 @@ class Mesh:
         self.face_vertices = [[self.vertices[idx] for idx in face.vertex_indices] for face in self.faces]
         self.poly3d = Poly3DCollection(self.face_vertices, facecolors='white', edgecolors='black', alpha=0.8)
         self.calculate_face_centers()
-        self.calculate_face_normals()
+        self.calculate_face_normals()  
+        self.calculate_face_areas()
         self.calculate_genus()
-
+        self.calculate_cot_matrix()
 
     def write_off(self, file_path):
         with open(file_path, 'w') as file:
@@ -88,6 +91,27 @@ class Mesh:
            v0, v1, v2 = [np.array(self.vertices[i]) for i in face.vertex_indices[:3]]
            face.normal = np.cross(v1 - v0, v2 - v0)
     
+    def calculate_face_areas(self):
+        for face in self.faces:
+            coords = [np.array(self.vertices[i]) for i in face.vertex_indices[:3]]
+            face.area = compute_triangle_area(coords)
+    
+    def calculate_vertex_normals(self):
+        vertex_normals = np.zeros_like(self.vertices)
+        for face in self.faces:
+            face_normal = face.normal
+            for vertex_idx in face.vertex_indices:
+                vertex_normals[vertex_idx] += face_normal
+        vertex_normals = (vertex_normals.T / np.linalg.norm(vertex_normals, axis=1)).T  # Normalize 
+        return vertex_normals
+    
+    def get_vertex_masses(self):
+        vertex_masses = np.zeros(self.vertices.shape[0])
+        for face in self.faces:
+            for vertex_idx in face.vertex_indices:
+                vertex_masses[vertex_idx] += face.area / 3
+        return vertex_masses
+
     def calculate_face_adjacency_matrix(self):
         num_faces = len(self.faces)
         adjacency_matrix = np.zeros((num_faces, num_faces), dtype=int)
@@ -169,7 +193,7 @@ class Mesh:
         """
         if self.genus != 0:
             print(f"Warning: This mesh has genus {self.genus}. The cMCF algorithm is designed for genus-zero surfaces.")
-        L = self._compute_stiffness_matrix()
+        L =  self.cot_matrix
         for i in range(n_iterations):
             M = self._compute_mass_matrix()
             # Solve the equation: (M - t*L) * V_{n+1} = M * V_n
@@ -199,13 +223,13 @@ class Mesh:
                 data.append(area / 3)  # Barycentric mass distribution
         return csr_matrix((data, (row, col)), shape=(num_vertices, num_vertices))
 
-    def _compute_stiffness_matrix(self):
+    def calculate_cot_matrix(self):
         num_vertices = len(self.vertices)
         row, col, data = [], [], []
         for face in self.faces:
             v_indices = face.vertex_indices
             coords = np.array([self.vertices[i] for i in v_indices])
-            cot_weights = self._compute_cotangent_weights(coords)
+            cot_weights = self.calculate_cotangent_weights(coords)
             for i in range(3):
                 j = (i + 1) % 3
                 k = (i + 2) % 3
@@ -214,9 +238,9 @@ class Mesh:
                     row.extend([v_indices[i], v_indices[j], v_indices[i], v_indices[j]])
                     col.extend([v_indices[j], v_indices[i], v_indices[i], v_indices[j]])
                     data.extend([weight, weight, -weight, -weight])
-        return csr_matrix((data, (row, col)), shape=(num_vertices, num_vertices))
+        self.cot_matrix = csr_matrix((data, (row, col)), shape=(num_vertices, num_vertices))
     
-    def _compute_cotangent_weights(self, coords):
+    def calculate_cotangent_weights(self, coords):
         # Compute cotangent weights for a triangle
         v1, v2, v3 = coords
         e1, e2, e3 = v2 - v3, v3 - v1, v1 - v2
@@ -231,5 +255,79 @@ class Mesh:
             0.5 * safe_cot(e3, -e1),
             0.5 * safe_cot(e1, -e2)
         ]
+    
+    def get_neighbor_faces(self, face_index):
+        # Given a face index, return the indices of neighboring faces that share at least one vertex.
+        target_face = self.faces[face_index]  
+        target_vertices = set(target_face.vertex_indices)  
+        neighbor_faces = []
+        for i, face in enumerate(self.faces):
+            if i == face_index:
+                continue 
+            if target_vertices.intersection(face.vertex_indices):
+                neighbor_faces.append(i)
+        return neighbor_faces
+    
+    # def setup_edge_normals(self):
+    #     self.edge_normals = {}
+    #     for i, face in enumerate(self.faces):
+    #         for j in range(3): 
+    #             v1, v2 = face.vertex_indices[j], face.vertex_indices[(j+1) % 3]
+    #             shared_faces = [f for f in self.faces if set([v1, v2]).issubset(f.vertex_indices)]
+    #             if len(shared_faces) == 2:
+    #                 other_face = shared_faces[1] if shared_faces[0] == face else shared_faces[0]
+    #                 edge_normal = (face.normal * face.area + 
+    #                                other_face.normal * other_face.area)
+    #                 edge_normal /= np.linalg.norm(edge_normal)
+    #                 self.edge_normals[v1][v2] = edge_normal
+    #                 self.edge_normals[v2][v1] = edge_normal
+                
+
+    def setup_edge_normals(self):
+        self.edge_normals = {}
+        for i, face in enumerate(self.faces):
+            neighbors = self.get_neighbor_faces(i)   
+            for neighbor_index in neighbors:
+                edge_normal = (face.normal * face.area + 
+                               self.faces[neighbor_index].normal * self.faces[neighbor_index].area)
+                edge_normal = edge_normal / np.linalg.norm(edge_normal)
+                
+                if i not in self.edge_normals:
+                    self.edge_normals[i] = {}
+                self.edge_normals[i][neighbor_index] = edge_normal
+            
+    def edge_normalizing_flow(self,n_iterations ,step_factor):
+        for i in range(n_iterations):   
+            self.setup_edge_normals()
+            rhs = self.edge_normalizing_rhs(step_factor)
+            self.vertices = spsolve(self.cot_matrix, rhs)
+            self.shift_and_normalize()
+            self.update_properties()
+    
+    def edge_normalizing_rhs(self, step_size):
+        # Sets up the right-hand side of the equation for the flow.
+        rhs = np.zeros_like(self.vertices)
+        vertex_normals = self.calculate_vertex_normals()
+        vertex_masses = self.get_vertex_masses()
         
+        for current_vertex_id in range(len(self.vertices)):
+            scaled_vertex_normal = vertex_normals[current_vertex_id] / vertex_masses[current_vertex_id]
+        
+            for neighbor_id, edge_normal in self.edge_normals[current_vertex_id].items():
+                scaled_neighbor_normal = vertex_normals[neighbor_id] / vertex_masses[neighbor_id]
+                mean_vertex_normal = (scaled_vertex_normal + scaled_neighbor_normal)
+                mean_vertex_normal /= np.linalg.norm(mean_vertex_normal)
+                rotation = Rotation.from_rotvec(
+                    step_size * np.cross(edge_normal, mean_vertex_normal)
+                )
+                
+                edge = self.vertices[neighbor_id] - self.vertices[current_vertex_id]
+                rotated_edge = rotation.apply(edge)
+
+                cot_weight = self.cot_matrix[current_vertex_id, neighbor_id]
+                rhs[current_vertex_id] += cot_weight * rotated_edge
+                rhs[neighbor_id] += cot_weight * (-rotated_edge)
+        return rhs
+        
+
     
