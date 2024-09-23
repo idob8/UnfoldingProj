@@ -7,9 +7,8 @@ from Mesh import Mesh
 import PolygonCollision
 from PolygonCollision.shape import Shape
 import random
-from math import sqrt
 
-class Polygon2D:
+class Mesh2D:
     def __init__(self):
         self.polygons = {}
         self.bounding_boxes = {}
@@ -28,103 +27,15 @@ class Polygon2D:
             np.array([min_x, min_y]),
             np.array([max_x, max_y])
         )
-
-    def bounding_boxes_intersect(self, face1_index, face2_index):
-        (min1_x, min1_y), (max1_x, max1_y) = self.bounding_boxes[face1_index]
-        (min2_x, min2_y), (max2_x, max2_y) = self.bounding_boxes[face2_index]
-        
-        return (min1_x <= max2_x and max1_x >= min2_x and
-                min1_y <= max2_y and max1_y >= min2_y)
-        
-    def check_face_collision(self, face1_index, face2_index):
-        if face1_index == face2_index:
-            return False
-        if not self.bounding_boxes_intersect(face1_index, face2_index):
-            return False
-        
-        poly1 = list(self.polygons[face1_index].values())
-        poly2 = list(self.polygons[face2_index].values())
-        
-        # Check if polygons share an edge
-        # edges1 = set(frozenset([tuple(poly1[i]), tuple(poly1[(i+1)%len(poly1)])]) for i in range(len(poly1)))
-        # edges2 = set(frozenset([tuple(poly2[i]), tuple(poly2[(i+1)%len(poly2)])]) for i in range(len(poly2)))
-        # shared_edges = edges1.intersection(edges2)
-
-        # if shared_edges:
-            # If they share an edge, check if they overlap
-        return self.check_overlap(poly1, poly2)
     
-        # If no shared edge, use Separating Axis Theorem
-        # return self.separating_axis_theorem(poly1, poly2)
-    
-    def check_overlap(self, poly1, poly2):
-        for point in poly1:
-            if self.point_inside_polygon(point, poly2):
-                return True
-        # for point in poly2:
-        #     if self.point_inside_polygon(point, poly1):
-        #         return True
-        return False
-
-    def point_inside_polygon(self, point, polygon):
-        x, y = point
-        n = len(polygon)
-        inside = False
-        p1x, p1y = polygon[0]
-        for i in range(n + 1):
-            p2x, p2y = polygon[i % n]
-            if y > min(p1y, p2y):
-                if y <= max(p1y, p2y):
-                    if x <= max(p1x, p2x):
-                        if p1y != p2y:
-                            xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
-                        if p1x == p2x or x <= xinters:
-                            inside = not inside
-            p1x, p1y = p2x, p2y
-        return inside
-
-    def separating_axis_theorem(self, poly1, poly2):
-        for polygon in [poly1, poly2]:
-            for i in range(len(polygon)):
-                edge = np.array(polygon[i]) - np.array(polygon[i-1])
-                normal = np.array([-edge[1], edge[0]])
-
-                min_p1, max_p1 = float('inf'), float('-inf')
-                min_p2, max_p2 = float('inf'), float('-inf')
-
-                for vertex in poly1:
-                    projection = np.dot(normal, vertex)
-                    min_p1 = min(min_p1, projection)
-                    max_p1 = max(max_p1, projection)
-
-                for vertex in poly2:
-                    projection = np.dot(normal, vertex)
-                    min_p2 = min(min_p2, projection)
-                    max_p2 = max(max_p2, projection)
-
-                if max_p1 < min_p2 or max_p2 < min_p1:
-                    return False  # Separating axis found, no collision
-
-        return True  # No separating axis found, collision exists
-    
-    def sort_polygons(self):
-        sorted_polygons = sorted(self.polygons.keys(), key=lambda idx: self.bounding_boxes[idx][1][0])
-        return sorted_polygons
-
-    def detect_all_collisions(self):
-        collisions = []
-        face_indices = list(self.sort_polygons())
-        for i, face1_index in enumerate(face_indices):
-            for face2_index in face_indices[i+1:]:
-                if self.check_face_collision(face1_index, face2_index):
-                    collisions.append((face1_index, face2_index))
-        return collisions
-
-    def visualize_polygons(self):
+    def visualize(self):
         fig, ax = plt.subplots(figsize=(10, 10))
-        for face_index, vertices_2d in self.polygons.items():
+        for _, vertices_2d in self.polygons.items():
             polygon = plt.Polygon(list(vertices_2d.values()), fill=None, edgecolor='black')
             ax.add_patch(polygon)
+            # centroid = np.mean(vertices_2d, axis=0)
+            # ax.text(centroid[0], centroid[1], str(face_index), ha='center', va='center')
+
         ax.autoscale()
         ax.set_aspect('equal')
         plt.xlabel('X')
@@ -132,10 +43,73 @@ class Polygon2D:
         plt.title('Unfolded Mesh')
         plt.show()
 
+    def count_collisions(self):
+        collision_count = 0
+        for i in range(len(self.polygons)):
+            for j in range(i + 1, len(self.polygons)):
+                if(self.faces_overlap(i, j)):
+                    collision_count += 1            
+        return collision_count
+    
+    def faces_overlap(self, face_index1, face_index2):
+        def orientation(p, q, r):
+            return (q[1] - p[1]) * (r[0] - q[0]) - (q[0] - p[0]) * (r[1] - q[1])
+
+        def line_intersect(p1, q1, p2, q2):
+            o1 = orientation(p1, q1, p2)
+            o2 = orientation(p1, q1, q2)
+            o3 = orientation(p2, q2, p1)
+            o4 = orientation(p2, q2, q1)
+            
+            if o1 * o2 < 0 and o3 * o4 < 0:
+                return True
+            return False
+
+        def point_inside_triangle(p, triangle):
+            a, b, c = triangle
+            area = abs(orientation(a, b, c))
+            area1 = abs(orientation(p, b, c))
+            area2 = abs(orientation(a, p, c))
+            area3 = abs(orientation(a, b, p))
+            return abs(area - (area1 + area2 + area3)) < 1e-5
+        
+        def bounding_boxes_intersect(face_index1, face_index2):
+            (min1_x, min1_y), (max1_x, max1_y) = self.bounding_boxes[face_index1]
+            (min2_x, min2_y), (max2_x, max2_y) = self.bounding_boxes[face_index2]
+            
+            return (min1_x <= max2_x and max1_x >= min2_x and
+                    min1_y <= max2_y and max1_y >= min2_y)
+        
+        if(not bounding_boxes_intersect(face_index1, face_index2)): return False
+
+        # Check if triangles share an edge
+        shared_vertices_3d = (set(self.polygons[face_index1].keys()) & set(self.polygons[face_index2].keys()))
+        if(len(shared_vertices_3d) == 2):
+            # Check if 3rd point is causing a collision
+            shared_vertices_2d = [self.polygons[face_index1][v] for v in shared_vertices_3d]
+            face1_third_point = self.polygons[face_index1][list(set(self.polygons[face_index1].keys() - shared_vertices_3d))[0]]
+            face2_third_point = self.polygons[face_index2][list(set(self.polygons[face_index2].keys() - shared_vertices_3d))[0]]
+
+            if(line_intersect(shared_vertices_2d[0], face1_third_point, shared_vertices_2d[1], face2_third_point) or
+               line_intersect(shared_vertices_2d[1], face1_third_point, shared_vertices_2d[0], face2_third_point)): return True
+            
+            if(point_inside_triangle(face1_third_point, self.polygons[face_index2].values()) or
+               point_inside_triangle(face2_third_point, self.polygons[face_index1].values())): return True
+
+        else:
+            face1_2d = list(self.polygons[face_index1].values())
+            face2_2d = list(self.polygons[face_index2].values())
+            for i in range(3):
+                for j in range(3):
+                    if line_intersect(face1_2d[i], face1_2d[(i+1)%3], face2_2d[j], face2_2d[(j+1)%3]):
+                        return True
+
+        return False
+
 class Unfolder:
     def __init__(self,mesh):
-        self.mesh = mesh 
-        self.polygon_2d = Polygon2D()
+        self.mesh = mesh
+        self.mesh_2d = Mesh2D()
     
     def find_approximated_mst(self):
         edge_weights = self.mesh.calculate_dual_edge_weights()
@@ -170,7 +144,7 @@ class Unfolder:
         self.unfold_face(root, None, tree)
 
     def unfold_face(self, face_index, parent_index, tree):
-        if face_index in self.polygon_2d.polygons:
+        if face_index in self.mesh_2d.polygons:
             return
         face = self.mesh.faces[face_index]
         if parent_index is None:
@@ -178,15 +152,14 @@ class Unfolder:
             a, b, c = face.vertex_indices[:3]
             va, vb, vc = self.mesh.vertices[a], self.mesh.vertices[b], self.mesh.vertices[c]
             
-            # Place first two vertices along x-axis
+            # Place first two vertices along x-axis and calculate position of third vertex
             x1 = np.linalg.norm(np.array(vb) - np.array(va))
-            vertices_2d = {a: (0, 0), b: (x1, 0)}
-            
             vec1 = np.array(vb) - np.array(va)
             vec2 = np.array(vc) - np.array(va)
             x2 = np.dot(vec1, vec2) / np.linalg.norm(vec1)
             y2 = np.sqrt(np.dot(vec2, vec2) - x2*x2)
-            vertices_2d[c] = (x2, y2)
+            self.mesh_2d.add_polygon(face_index, {a: (0, 0), b: (x1, 0), c: (x2, y2)})
+
         else:
             # This face shares an edge with its parent. Use that information to place it.
             parent_face = self.mesh.faces[parent_index]
@@ -196,7 +169,7 @@ class Unfolder:
                 raise ValueError(f"Faces {face_index} and {parent_index} don't share an edge")
             
             # Get 2D coordinates of shared edge in parent face
-            parent_2d = self.polygon_2d.polygons[parent_index]
+            parent_2d = self.mesh_2d.polygons[parent_index]
             edge_2d = [parent_2d[v] for v in shared_edge]
             
             # Find the vertex of this face that's not in the shared edge
@@ -217,34 +190,41 @@ class Unfolder:
             normal = normal / np.linalg.norm(normal)
             
             new_point = np.array(edge_2d[0]) + (proj/edge_len)*edge_2d_vec + height*normal
-
-            vertices_2d = {shared_edge[0]: edge_2d[0], 
-                           shared_edge[1]: edge_2d[1], 
-                           new_vertex: tuple(new_point)}
             
-        self.polygon_2d.add_polygon(face_index, vertices_2d)
+            # Store the 2D coordinates
+            self.mesh_2d.add_polygon(face_index, {shared_edge[0]: edge_2d[0], 
+                                                  shared_edge[1]: edge_2d[1], new_vertex: tuple(new_point)})
+            
+            if self.mesh_2d.faces_overlap(face_index, parent_index):
+                new_point = np.array(edge_2d[0]) + (proj/edge_len)*edge_2d_vec - height*normal
+                self.mesh_2d.add_polygon(face_index, {shared_edge[0]: edge_2d[0], 
+                                            shared_edge[1]: edge_2d[1], new_vertex: tuple(new_point)})
+
         # Recursively unfold children
-        
         for child in tree.get_children(face_index):
             if child != parent_index:
                 self.unfold_face(child, face_index, tree)
 
-
     def steepest_edge_unfolder(self):
-        # Initialize empty list T
+        ## Initialize empty list T
         cut_tree = []
-        # Generate random normalized 3D vector c
+
+        ## Generate random normalized 3D vector c
         c = np.array([random.uniform(-1, 1) for _ in range(3)])
         c = c / np.linalg.norm(c)  # Normalize the vector
-        # Find the top vertex with respect to c
+
+        ## Find the top vertex with respect to c
         top_vertex_index = max(range(len(self.mesh.vertices)), key=lambda i: np.dot(self.mesh.vertices[i], c))
-        # Process each vertex except the top
+
+        ## Process each vertex except the top
         for i, vertex in enumerate(self.mesh.vertices):
             if i == top_vertex_index:
                 continue
-            # Find the edge with highest dot product with c
+
+            ## Find the edge with highest dot product with c
             max_dot_product = float('-inf')
             steepest_edge = None
+
             for face in self.mesh.faces:
                 if i in face.vertex_indices:
                     for v in face.vertex_indices:
@@ -255,8 +235,10 @@ class Unfolder:
                             if dot_product > max_dot_product:
                                 max_dot_product = dot_product
                                 steepest_edge = set([i, v])
+
             if steepest_edge:
                 cut_tree.append(steepest_edge)
+
         return self.cut_tree_to_unfold_tree(cut_tree)
 
     def cut_tree_to_unfold_tree(self, cut_edges):
@@ -309,4 +291,3 @@ class Unfolder:
                 inserted_faces.add(lost_node)
 
         return face_tree
-    
