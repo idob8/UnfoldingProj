@@ -21,14 +21,14 @@ faces = [
 # Create the mesh
 # mesh = Mesh(vertices=vertices, faces=faces)
 mesh = Mesh()
-mesh.read_off(r"C:\Users\user\OneDrive\Merav\Technion\DGP\data\phands.off")
+mesh.read_off("/Users/meravkeidar/OneDrive/Technion/semester4/DGP/DigitalGeometryProcessing/HW2/hw2_data/cat.off")
 
 
 # Print and visualize original state
 print(f"Total squared original angle deficit: {mesh.calculate_total_squared_angle_deficit():.6f}")
 mesh.visualize()
 # Apply the edge normalizing flow
-mesh.edge_normal_alignment_flow(n_iterations=100, step_size=0.1)
+mesh.edge_normal_alignment_flow(n_iterations=5, step_size=0.1)
 
 # Print and visualize transformed state
 print(f"Total squared final angle deficit: {mesh.calculate_total_squared_angle_deficit():.6f}")

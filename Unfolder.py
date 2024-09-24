@@ -50,16 +50,30 @@ class Mesh2D:
         return collision_count
     
     def orientation(self, p, q, r):
-            return (q[1] - p[1]) * (r[0] - q[0]) - (q[0] - p[0]) * (r[1] - q[1])
-    
+        val = (q[1] - p[1]) * (r[0] - q[0]) - (q[0] - p[0]) * (r[1] - q[1])
+        if abs(val) < 1e-8:  
+            return 0  # Collinear
+        return 1 if val > 0 else -1
+
+    def on_segment(self, p, q, r):
+        return (min(p[0], q[0]) <= r[0] <= max(p[0], q[0]) and
+                min(p[1], q[1]) <= r[1] <= max(p[1], q[1]))
+
     def line_intersect(self, p1, q1, p2, q2):
         o1 = self.orientation(p1, q1, p2)
         o2 = self.orientation(p1, q1, q2)
         o3 = self.orientation(p2, q2, p1)
         o4 = self.orientation(p2, q2, q1)
-        
-        if o1 * o2 < 0 and o3 * o4 < 0:
+
+        # General case
+        if o1 != o2 and o3 != o4:
             return True
+        # Special Cases
+        if o1 == 0 and self.on_segment(p1, q1, p2): return True
+        if o2 == 0 and self.on_segment(p1, q1, q2): return True
+        if o3 == 0 and self.on_segment(p2, q2, p1): return True
+        if o4 == 0 and self.on_segment(p2, q2, q1): return True
+
         return False
 
     def point_inside_triangle(self, p, triangle):
@@ -80,23 +94,36 @@ class Mesh2D:
     def shared_edge_overlap(self, face_index1, face_index2, shared_vertices):
         # Get the shared edge vertices
         v1, v2 = shared_vertices
-        
+
         # Get the non-shared vertex for each triangle
         p1 = list(set(self.polygons[face_index1].keys()) - set(shared_vertices))[0]
         p2 = list(set(self.polygons[face_index2].keys()) - set(shared_vertices))[0]
+
+        # Check if the line segment (p1, p2) intersects with the shared edge (v1, v2) -
+        # if they do -  each third point is on the other side of the shared edge - the faces do not collide
+        # if they dont -  both third points are on the same side of the shared edge - the faces collide
+        return not (self.line_intersect(self.polygons[face_index1][p1], self.polygons[face_index2][p2],
+                                   self.polygons[face_index1][v1], self.polygons[face_index1][v2]))
+
+        # # Get the shared edge vertices
+        # v1, v2 = shared_vertices
         
-        # Get 2D coordinates
-        v1_coord = self.polygons[face_index1][v1]
-        v2_coord = self.polygons[face_index1][v2]
-        p1_coord = self.polygons[face_index1][p1]
-        p2_coord = self.polygons[face_index2][p2]
+        # # Get the non-shared vertex for each triangle
+        # p1 = list(set(self.polygons[face_index1].keys()) - set(shared_vertices))[0]
+        # p2 = list(set(self.polygons[face_index2].keys()) - set(shared_vertices))[0]
         
-        # Use the orientation function to determine if p1 and p2 are on the same side of the edge
-        o1 = self.orientation(v1_coord, v2_coord, p1_coord)
-        o2 = self.orientation(v1_coord, v2_coord, p2_coord)
+        # # Get 2D coordinates
+        # v1_coord = self.polygons[face_index1][v1]
+        # v2_coord = self.polygons[face_index1][v2]
+        # p1_coord = self.polygons[face_index1][p1]
+        # p2_coord = self.polygons[face_index2][p2]
         
-        # If orient1 and orient2 have the same sign, the points are on the same side
-        return o1 * o2 > 0
+        # # Use the orientation function to determine if p1 and p2 are on the same side of the edge
+        # o1 = self.orientation(v1_coord, v2_coord, p1_coord)
+        # o2 = self.orientation(v1_coord, v2_coord, p2_coord)
+        
+        # # If orient1 and orient2 have the same sign, the points are on the same side
+        # return o1 * o2 > 0
 
     def faces_overlap(self, face_index1, face_index2):
         if(not self.bounding_boxes_intersect(face_index1, face_index2)): return False
@@ -104,10 +131,9 @@ class Mesh2D:
         # Check if triangles share an edge
         shared_vertices_3d = (set(self.polygons[face_index1].keys()) & set(self.polygons[face_index2].keys()))
         if(len(shared_vertices_3d) == 2):
-            # Check if 3rd point is causing a collision
             return self.shared_edge_overlap(face_index1, face_index2, shared_vertices_3d)
         
-        #faces comletely overlap
+        #faces completly overlap
         if(len(shared_vertices_3d) == 3):
             return True
         

@@ -47,7 +47,6 @@ class Mesh:
             self.vertices = np.loadtxt(lines[2:2+n_verts], dtype=float)
             self.faces = [Face(list(map(int, line.strip().split()[1:]))) for line in lines[2+n_verts:2+n_verts+n_faces]]
         self.update_properties()
-        
 
     def update_properties(self):
         self.face_vertices = [[self.vertices[idx] for idx in face.vertex_indices] for face in self.faces]
@@ -191,14 +190,14 @@ class Mesh:
             face.weight = weight if weight != 0 else xzero 
 
 
-    def conformalized_mean_curvature_flow(self, n_iterations, step_factor):
+    def mean_curvature_flow(self, n_iterations, step_factor):
         """
-        Apply Conformalized Mean Curvature Flow to the mesh.
+        Apply Mean Curvature Flow to the mesh.
         :param n_iterations: Number of iterations to perform
         :param step_factor: Step factor (t in the equation)
         """
         if self.genus != 0:
-            print(f"Warning: This mesh has genus {self.genus}. The cMCF algorithm is designed for genus-zero surfaces.")
+            print(f"Warning: This mesh has genus {self.genus}. The MCF algorithm is designed for genus-zero surfaces.")
         L =  self.cot_matrix
         for i in range(n_iterations):
             M = self._compute_mass_matrix()
@@ -207,7 +206,7 @@ class Mesh:
             b = M @ self.vertices
             new_vertices = spsolve(A, b)
             if np.any(np.isnan(new_vertices)):
-                print("Warning: NaN values detected, skipping this iteration of cMCF")
+                print("Warning: NaN values detected, skipping this iteration of MCF")
                 continue
             self.vertices = new_vertices
             self.vertices = new_vertices
@@ -269,8 +268,6 @@ class Mesh:
             0.5 * safe_cot(e3, -e1),
             0.5 * safe_cot(e1, -e2)
         ]
-    
-     
 
     def setup_edge_normals(self):
         self.edge_normals = [{} for _ in range(len(self.vertices))]
@@ -324,8 +321,6 @@ class Mesh:
             for face in adjacent_faces:
                 other_vertices = [self.vertices[j] for j in face.vertex_indices if j != i]
                 v1, v2 = other_vertices
-
-
                 e1 = v1 - vertex
                 e2 = v2 - vertex
                 angle = np.arccos(np.dot(e1, e2) / (np.linalg.norm(e1) * np.linalg.norm(e2)))

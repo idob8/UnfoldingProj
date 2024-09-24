@@ -6,7 +6,7 @@ from matplotlib.patches import Polygon
 #from scipy.spatial import ConvexHull
 import heapq
 from Tree import Tree 
-from Unfolder import Unfolder, Polygon2D
+from Unfolder import Unfolder, Mesh2D
 
 vertices = [
     [1, 1, 1],
@@ -35,8 +35,8 @@ faces = [
 # collision = interPoly.check_face_collision(1, 2)
 # print(f"Polygons intersect: {collision}") 
 
-mesh = Mesh()
-mesh.read_off("/Users/meravkeidar/OneDrive/Technion/semester4/DGP/DigitalGeometryProcessing/HW2/hw2_data/sphere_s0.off")
+# mesh = Mesh()
+# mesh.read_off("/Users/meravkeidar/OneDrive/Technion/semester4/DGP/DigitalGeometryProcessing/HW2/hw2_data/sphere_s0.off")
 
 mesh = Mesh(vertices= vertices, faces= faces)
 print("Visualizing original 3D mesh:")
@@ -44,9 +44,10 @@ print("Visualizing original 3D mesh:")
 unfolder = Unfolder(mesh)
 tree = unfolder.steepest_edge_unfolder()
 unfolder.unfold_mesh_along_tree(tree)
-unfolder.polygon_2d.visualize_polygons()
-collisions = unfolder.polygon_2d.detect_all_collisions()
-print(f"number of collisions {len(collisions)} ")
+# unfolder.mesh_2d.visualize()
+print(unfolder.mesh_2d.polygons)
+collisions = unfolder.mesh_2d.count_collisions()
+print(f"number of collisions {(collisions)} ")
 
 # mesh.conformalized_mean_curvature_flow(1,0.1)
 # mesh.edge_normalizing_flow(1,0.1)
