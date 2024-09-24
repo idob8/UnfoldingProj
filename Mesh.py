@@ -89,7 +89,13 @@ class Mesh:
     def calculate_face_normals(self):
         for face in self.faces:
            v0, v1, v2 = [np.array(self.vertices[i]) for i in face.vertex_indices[:3]]
-           face.normal = np.cross(v1 - v0, v2 - v0)
+           normal = np.cross(v1 - v0, v2 - v0)
+           norm = np.linalg.norm(normal)
+           if norm > 0:
+               face.normal = normal / norm
+           else:
+               print(f"Warning: Degenerate face detected at indices {face.vertex_indices}")
+               face.normal = np.array([0.0, 0.0, 0.0])
     
     def calculate_face_areas(self):
         for face in self.faces:
@@ -200,6 +206,10 @@ class Mesh:
             A = M - step_factor * L
             b = M @ self.vertices
             new_vertices = spsolve(A, b)
+            if np.any(np.isnan(new_vertices)):
+                print("Warning: NaN values detected, skipping this iteration of cMCF")
+                continue
+            self.vertices = new_vertices
             self.vertices = new_vertices
             self.shift_and_normalize()
         self.update_properties()
@@ -208,7 +218,10 @@ class Mesh:
         center = np.mean(self.vertices, axis=0)
         self.vertices -= center
         scale = np.max(np.linalg.norm(self.vertices, axis=1))
-        self.vertices /= scale
+        if scale > 0:
+            self.vertices /= scale
+        else:
+            print("Warning: Scale is zero, skipping normalization")
 
     def _compute_mass_matrix(self):
         num_vertices = len(self.vertices)
@@ -239,6 +252,7 @@ class Mesh:
                     col.extend([v_indices[j], v_indices[i], v_indices[i], v_indices[j]])
                     data.extend([weight, weight, -weight, -weight])
         self.cot_matrix = csr_matrix((data, (row, col)), shape=(num_vertices, num_vertices))
+        self.cot_matrix.setdiag(self.cot_matrix.diagonal() + 1e-8)  # Add small regularization term
     
     def calculate_cotangent_weights(self, coords):
         # Compute cotangent weights for a triangle
@@ -256,78 +270,89 @@ class Mesh:
             0.5 * safe_cot(e1, -e2)
         ]
     
-    def get_neighbor_faces(self, face_index):
-        # Given a face index, return the indices of neighboring faces that share at least one vertex.
-        target_face = self.faces[face_index]  
-        target_vertices = set(target_face.vertex_indices)  
-        neighbor_faces = []
-        for i, face in enumerate(self.faces):
-            if i == face_index:
-                continue 
-            if target_vertices.intersection(face.vertex_indices):
-                neighbor_faces.append(i)
-        return neighbor_faces
-    
-    # def setup_edge_normals(self):
-    #     self.edge_normals = {}
-    #     for i, face in enumerate(self.faces):
-    #         for j in range(3): 
-    #             v1, v2 = face.vertex_indices[j], face.vertex_indices[(j+1) % 3]
-    #             shared_faces = [f for f in self.faces if set([v1, v2]).issubset(f.vertex_indices)]
-    #             if len(shared_faces) == 2:
-    #                 other_face = shared_faces[1] if shared_faces[0] == face else shared_faces[0]
-    #                 edge_normal = (face.normal * face.area + 
-    #                                other_face.normal * other_face.area)
-    #                 edge_normal /= np.linalg.norm(edge_normal)
-    #                 self.edge_normals[v1][v2] = edge_normal
-    #                 self.edge_normals[v2][v1] = edge_normal
-                
+     
 
     def setup_edge_normals(self):
-        self.edge_normals = {}
-        for i, face in enumerate(self.faces):
-            neighbors = self.get_neighbor_faces(i)   
-            for neighbor_index in neighbors:
-                edge_normal = (face.normal * face.area + 
-                               self.faces[neighbor_index].normal * self.faces[neighbor_index].area)
-                edge_normal = edge_normal / np.linalg.norm(edge_normal)
+        self.edge_normals = [{} for _ in range(len(self.vertices))]
+        
+        for face in self.faces:
+            for i in range(3):
+                v1, v2 = face.vertex_indices[i], face.vertex_indices[(i+1) % 3]
+                if v2 not in self.edge_normals[v1]:
+                    self.edge_normals[v1][v2] = np.zeros(3)
+                    self.edge_normals[v2][v1] = np.zeros(3)
                 
-                if i not in self.edge_normals:
-                    self.edge_normals[i] = {}
-                self.edge_normals[i][neighbor_index] = edge_normal
-            
-    def edge_normalizing_flow(self,n_iterations ,step_factor):
-        for i in range(n_iterations):   
-            self.setup_edge_normals()
-            rhs = self.edge_normalizing_rhs(step_factor)
-            self.vertices = spsolve(self.cot_matrix, rhs)
-            self.shift_and_normalize()
-            self.update_properties()
-    
+                self.edge_normals[v1][v2] += face.normal * face.area
+                self.edge_normals[v2][v1] += face.normal * face.area
+        
+        for i in range(len(self.vertices)):
+            for j in self.edge_normals[i]:
+                self.edge_normals[i][j] = self.edge_normals[i][j] / np.linalg.norm(self.edge_normals[i][j])
+
     def edge_normalizing_rhs(self, step_size):
         # Sets up the right-hand side of the equation for the flow.
-        rhs = np.zeros_like(self.vertices)
         vertex_normals = self.calculate_vertex_normals()
         vertex_masses = self.get_vertex_masses()
-        
-        for current_vertex_id in range(len(self.vertices)):
-            scaled_vertex_normal = vertex_normals[current_vertex_id] / vertex_masses[current_vertex_id]
-        
-            for neighbor_id, edge_normal in self.edge_normals[current_vertex_id].items():
-                scaled_neighbor_normal = vertex_normals[neighbor_id] / vertex_masses[neighbor_id]
-                mean_vertex_normal = (scaled_vertex_normal + scaled_neighbor_normal)
-                mean_vertex_normal /= np.linalg.norm(mean_vertex_normal)
-                rotation = Rotation.from_rotvec(
-                    step_size * np.cross(edge_normal, mean_vertex_normal)
-                )
-                
-                edge = self.vertices[neighbor_id] - self.vertices[current_vertex_id]
+        rhs = np.zeros_like(self.vertices)
+
+        for i in range(len(self.vertices)):
+            for j in self.edge_normals[i]:
+                # Calculate the target normal as the average of vertex normals
+                target_normal = (vertex_normals[i] / vertex_masses[i] + 
+                                 vertex_normals[j] / vertex_masses[j])
+                target_normal /= np.linalg.norm(target_normal)
+                # Current edge normal
+                current_normal = self.edge_normals[i][j]
+                # Calculate the rotation to align current_normal with target_normal
+                rotation_axis = np.cross(current_normal, target_normal)
+                rotation_angle = np.arccos(np.clip(np.dot(current_normal, target_normal), -1.0, 1.0))
+                rotation = Rotation.from_rotvec(step_size * rotation_angle * rotation_axis)
+                # Apply rotation to the edge
+                edge = self.vertices[j] - self.vertices[i]
                 rotated_edge = rotation.apply(edge)
-
-                cot_weight = self.cot_matrix[current_vertex_id, neighbor_id]
-                rhs[current_vertex_id] += cot_weight * rotated_edge
-                rhs[neighbor_id] += cot_weight * (-rotated_edge)
+                # Update the right-hand side
+                cot_weight = self.cot_matrix[i, j]
+                rhs[i] += cot_weight * rotated_edge
+                rhs[j] -= cot_weight * rotated_edge
         return rhs
-        
-
     
+    def calculate_angle_deficits(self):
+        angle_deficits = np.zeros(len(self.vertices))
+        for i, vertex in enumerate(self.vertices):
+            adjacent_faces = [face for face in self.faces if i in face.vertex_indices]
+            total_angle = 0
+            for face in adjacent_faces:
+                other_vertices = [self.vertices[j] for j in face.vertex_indices if j != i]
+                v1, v2 = other_vertices
+
+
+                e1 = v1 - vertex
+                e2 = v2 - vertex
+                angle = np.arccos(np.dot(e1, e2) / (np.linalg.norm(e1) * np.linalg.norm(e2)))
+                total_angle += angle
+            
+            # The angle deficit is 2π minus the total angle
+            angle_deficits[i] = 2 * np.pi - total_angle
+        
+        return angle_deficits
+
+    def calculate_total_squared_angle_deficit(self):
+        angle_deficits = self.calculate_angle_deficits()
+        return np.sum(angle_deficits**2)
+
+    def edge_normal_alignment_flow(self, n_iterations, step_size):
+        for iteration in range(n_iterations):
+            self.setup_edge_normals()
+            # Initialize the right-hand side of our system
+            rhs = self.edge_normalizing_rhs(step_size=step_size)
+            # Solve the system to get updated vertex positions
+            new_vertices = spsolve(self.cot_matrix, rhs)
+            # Check for NaN values
+            if np.any(np.isnan(new_vertices)):
+                print(f"Warning: NaN values detected in iteration {iteration}, stopping ENAF")
+                break
+            self.vertices = new_vertices.reshape(-1, 3)
+            # Normalize the mesh
+            self.shift_and_normalize()
+            self.update_properties()
+        

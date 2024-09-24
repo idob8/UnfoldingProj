@@ -77,18 +77,26 @@ class Mesh2D:
             return (min1_x <= max2_x and max1_x >= min2_x and
                     min1_y <= max2_y and max1_y >= min2_y)
 
-    def shared_edge_overlap(self, face_index1, face_index2, shared_vertices_3d):
-        face1_2d = list(self.polygons[face_index1].values())
-        face2_2d = list(self.polygons[face_index2].values())
-        # Check if 3rd point is causing a collision
-        shared_vertices_2d = [self.polygons[face_index1][v] for v in shared_vertices_3d]
-        face1_third_point = self.polygons[face_index1][list(set(self.polygons[face_index1].keys() - shared_vertices_3d))[0]]
-        face2_third_point = self.polygons[face_index2][list(set(self.polygons[face_index2].keys() - shared_vertices_3d))[0]]
-
-        if (self.point_inside_triangle(face1_third_point, face2_2d)): return True
-        if (self.point_inside_triangle(face2_third_point, face1_2d)): return True    
-    
-        return False
+    def shared_edge_overlap(self, face_index1, face_index2, shared_vertices):
+        # Get the shared edge vertices
+        v1, v2 = shared_vertices
+        
+        # Get the non-shared vertex for each triangle
+        p1 = list(set(self.polygons[face_index1].keys()) - set(shared_vertices))[0]
+        p2 = list(set(self.polygons[face_index2].keys()) - set(shared_vertices))[0]
+        
+        # Get 2D coordinates
+        v1_coord = self.polygons[face_index1][v1]
+        v2_coord = self.polygons[face_index1][v2]
+        p1_coord = self.polygons[face_index1][p1]
+        p2_coord = self.polygons[face_index2][p2]
+        
+        # Use the orientation function to determine if p1 and p2 are on the same side of the edge
+        o1 = self.orientation(v1_coord, v2_coord, p1_coord)
+        o2 = self.orientation(v1_coord, v2_coord, p2_coord)
+        
+        # If orient1 and orient2 have the same sign, the points are on the same side
+        return o1 * o2 > 0
 
     def faces_overlap(self, face_index1, face_index2):
         if(not self.bounding_boxes_intersect(face_index1, face_index2)): return False
