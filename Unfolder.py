@@ -4,8 +4,6 @@ from collections import defaultdict
 from Tree import Tree
 import heapq
 from Mesh import Mesh
-import PolygonCollision
-from PolygonCollision.shape import Shape
 import random
 
 class Mesh2D:
@@ -51,60 +49,72 @@ class Mesh2D:
                     collision_count += 1            
         return collision_count
     
-    def faces_overlap(self, face_index1, face_index2):
-        def orientation(p, q, r):
+    def orientation(self, p, q, r):
             return (q[1] - p[1]) * (r[0] - q[0]) - (q[0] - p[0]) * (r[1] - q[1])
-
-        def line_intersect(p1, q1, p2, q2):
-            o1 = orientation(p1, q1, p2)
-            o2 = orientation(p1, q1, q2)
-            o3 = orientation(p2, q2, p1)
-            o4 = orientation(p2, q2, q1)
-            
-            if o1 * o2 < 0 and o3 * o4 < 0:
-                return True
-            return False
-
-        def point_inside_triangle(p, triangle):
-            a, b, c = triangle
-            area = abs(orientation(a, b, c))
-            area1 = abs(orientation(p, b, c))
-            area2 = abs(orientation(a, p, c))
-            area3 = abs(orientation(a, b, p))
-            return abs(area - (area1 + area2 + area3)) < 1e-5
+    
+    def line_intersect(self, p1, q1, p2, q2):
+        o1 = self.orientation(p1, q1, p2)
+        o2 = self.orientation(p1, q1, q2)
+        o3 = self.orientation(p2, q2, p1)
+        o4 = self.orientation(p2, q2, q1)
         
-        def bounding_boxes_intersect(face_index1, face_index2):
+        if o1 * o2 < 0 and o3 * o4 < 0:
+            return True
+        return False
+
+    def point_inside_triangle(self, p, triangle):
+        a, b, c = triangle
+        area = abs(self.orientation(a, b, c))
+        area1 = abs(self.orientation(p, b, c))
+        area2 = abs(self.orientation(a, p, c))
+        area3 = abs(self.orientation(a, b, p))
+        return abs(area - (area1 + area2 + area3)) < 1e-5
+        
+    def bounding_boxes_intersect(self, face_index1, face_index2):
             (min1_x, min1_y), (max1_x, max1_y) = self.bounding_boxes[face_index1]
             (min2_x, min2_y), (max2_x, max2_y) = self.bounding_boxes[face_index2]
             
             return (min1_x <= max2_x and max1_x >= min2_x and
                     min1_y <= max2_y and max1_y >= min2_y)
-        
-        if(not bounding_boxes_intersect(face_index1, face_index2)): return False
+
+    def shared_edge_overlap(self, face_index1, face_index2, shared_vertices_3d):
+        face1_2d = list(self.polygons[face_index1].values())
+        face2_2d = list(self.polygons[face_index2].values())
+        # Check if 3rd point is causing a collision
+        shared_vertices_2d = [self.polygons[face_index1][v] for v in shared_vertices_3d]
+        face1_third_point = self.polygons[face_index1][list(set(self.polygons[face_index1].keys() - shared_vertices_3d))[0]]
+        face2_third_point = self.polygons[face_index2][list(set(self.polygons[face_index2].keys() - shared_vertices_3d))[0]]
+
+        if (self.point_inside_triangle(face1_third_point, face2_2d)): return True
+        if (self.point_inside_triangle(face2_third_point, face1_2d)): return True    
+    
+        return False
+
+    def faces_overlap(self, face_index1, face_index2):
+        if(not self.bounding_boxes_intersect(face_index1, face_index2)): return False
 
         # Check if triangles share an edge
         shared_vertices_3d = (set(self.polygons[face_index1].keys()) & set(self.polygons[face_index2].keys()))
         if(len(shared_vertices_3d) == 2):
             # Check if 3rd point is causing a collision
-            shared_vertices_2d = [self.polygons[face_index1][v] for v in shared_vertices_3d]
-            face1_third_point = self.polygons[face_index1][list(set(self.polygons[face_index1].keys() - shared_vertices_3d))[0]]
-            face2_third_point = self.polygons[face_index2][list(set(self.polygons[face_index2].keys() - shared_vertices_3d))[0]]
+            return self.shared_edge_overlap(face_index1, face_index2, shared_vertices_3d)
+        
+        #faces comletely overlap
+        if(len(shared_vertices_3d) == 3):
+            return True
+        
+        face1_2d = list(self.polygons[face_index1].values())
+        face2_2d = list(self.polygons[face_index2].values())
+        for i in range(3):
+            for j in range(3):
+                if self.line_intersect(face1_2d[i], face1_2d[(i+1)%3], face2_2d[j], face2_2d[(j+1)%3]):
+                    return True
 
-            if(line_intersect(shared_vertices_2d[0], face1_third_point, shared_vertices_2d[1], face2_third_point) or
-               line_intersect(shared_vertices_2d[1], face1_third_point, shared_vertices_2d[0], face2_third_point)): return True
-            
-            if(point_inside_triangle(face1_third_point, self.polygons[face_index2].values()) or
-               point_inside_triangle(face2_third_point, self.polygons[face_index1].values())): return True
+        #check if one triangle is completely in another 
+        face1_in_face2 = all(self.point_inside_triangle(point, face2_2d) for point in face1_2d)
+        face2_in_face1 = all(self.point_inside_triangle(point, face1_2d) for point in face2_2d)
 
-        else:
-            face1_2d = list(self.polygons[face_index1].values())
-            face2_2d = list(self.polygons[face_index2].values())
-            for i in range(3):
-                for j in range(3):
-                    if line_intersect(face1_2d[i], face1_2d[(i+1)%3], face2_2d[j], face2_2d[(j+1)%3]):
-                        return True
-
-        return False
+        return face1_in_face2 or face2_in_face1
 
 class Unfolder:
     def __init__(self,mesh):
