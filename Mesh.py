@@ -47,6 +47,7 @@ class Mesh:
             self.vertices = np.loadtxt(lines[2:2+n_verts], dtype=float)
             self.faces = [Face(list(map(int, line.strip().split()[1:]))) for line in lines[2+n_verts:2+n_verts+n_faces]]
         self.update_properties()
+        self.calculate_cot_matrix()
 
     def update_properties(self):
         self.face_vertices = [[self.vertices[idx] for idx in face.vertex_indices] for face in self.faces]
@@ -55,7 +56,6 @@ class Mesh:
         self.calculate_face_normals()  
         self.calculate_face_areas()
         self.calculate_genus()
-        self.calculate_cot_matrix()
 
     def write_off(self, file_path):
         with open(file_path, 'w') as file:

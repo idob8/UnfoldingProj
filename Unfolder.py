@@ -27,7 +27,7 @@ class Mesh2D:
         min_y, max_y = min(y_coords), max(y_coords)
         if min_x == max_x and min_y == max_y:
             print(f"Warning: Face {face_index} is degenerate")
-            self.bounding_boxes[face_index] = None
+            self.bounding_boxes[face_index] = 0
         self.bounding_boxes[face_index] = (
             np.array([min_x, min_y]),
             np.array([max_x, max_y])
@@ -119,7 +119,7 @@ class Mesh2D:
         return shared_vertices
 
     def faces_overlap(self, face_index1, face_index2):
-        if (self.bounding_boxes[face_index1] == None or self.bounding_boxes[face_index2] == None): 
+        if (self.bounding_boxes[face_index1] == 0 or self.bounding_boxes[face_index2] == 0): 
             return False # Degenerate face
         
         if(not self.bounding_boxes_intersect(face_index1, face_index2)): 
