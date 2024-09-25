@@ -2,14 +2,13 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import numpy as np
 from collections import defaultdict
-from Tree import Tree
 import heapq
 import random
 from scipy.sparse import csr_matrix,lil_matrix
 from scipy.sparse.linalg import spsolve
 from scipy.sparse.linalg import eigs
 from scipy.spatial.transform import Rotation
-xzero = 0.0001 
+epsilon = 1e-7
 
 def compute_triangle_area(coords):
     v1, v2, v3 = coords
@@ -141,8 +140,8 @@ class Mesh:
         for i in range(len(self.faces)):
             for j in range(i+1, len(self.faces)):
                 if adjacency_matrix[i, j]:
-                    weight_i = self.faces[i].weight if self.faces[i].weight != 0.0 else xzero
-                    weight_j = self.faces[j].weight if self.faces[j].weight != 0.0 else xzero
+                    weight_i = self.faces[i].weight if self.faces[i].weight != 0.0 else epsilon
+                    weight_j = self.faces[j].weight if self.faces[j].weight != 0.0 else epsilon
                     weight = weight_i / weight_j
                     edge_weights.append(((i, j), weight))
         return edge_weights
@@ -174,20 +173,20 @@ class Mesh:
             if len(coords) >= 3:
                 v0, v1, v2 = coords[0], coords[1], coords[2]
                 area = 0.5 * np.linalg.norm(np.cross(v1 - v0, v2 - v0))
-                face.weight = area if area != 0 else xzero  
+                face.weight = area if area != 0 else epsilon  
             else:
-                face.weight = xzero
+                face.weight = epsilon
 
     def assign_face_weights_random(self):
         for face in self.faces:
             weight = random.random()
-            face.weight = weight if weight != 0 else xzero
+            face.weight = weight if weight != 0 else epsilon
 
     def assign_face_weights_custom(self, custom_weights):
         if custom_weights is None or len(custom_weights) != len(self.faces):
             raise ValueError("Custom weights must be provided and match the number of faces.")
         for face, weight in zip(self.faces, custom_weights):
-            face.weight = weight if weight != 0 else xzero 
+            face.weight = weight if weight != 0 else epsilon 
 
 
     def mean_curvature_flow(self, n_iterations, step_factor):

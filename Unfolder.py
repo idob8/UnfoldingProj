@@ -1,12 +1,40 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from collections import defaultdict
-from Tree import Tree
 import heapq
 from Mesh import Mesh
 import random
 epsilon = 1e-7
 
+class Tree:
+    def __init__(self):
+        self.edges = []
+        self.nodes = set()
+        self.root = None
+        self.children = defaultdict(list)
+    
+    def add_edge(self, u, v, weight):
+        self.edges.append((u, v, weight))
+        self.nodes.update([u, v])
+        
+        if self.root is None:
+            self.root = u
+        
+        self.children[u].append(v)
+        self.children[v].append(u)
+
+    def get_edges(self):
+        return self.edges
+    
+    def get_nodes(self):
+        return self.nodes
+    
+    def get_root(self):
+        return self.root
+    
+    def get_children(self, node):
+        return self.children[node]
+    
 class Mesh2D:
     def __init__(self):
         self.polygons = {}

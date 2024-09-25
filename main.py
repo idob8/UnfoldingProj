@@ -35,8 +35,8 @@ faces = [
 # collision = interPoly.check_face_collision(1, 2)
 # print(f"Polygons intersect: {collision}") 
 
-# mesh = Mesh()
-# mesh.read_off("/Users/meravkeidar/OneDrive/Technion/semester4/DGP/DigitalGeometryProcessing/HW2/hw2_data/sphere_s0.off")
+mesh = Mesh()
+mesh.read_off("/Users/meravkeidar/OneDrive/Technion/semester4/DGP/DigitalGeometryProcessing/HW2/hw2_data/phands.off")
 
 mesh = Mesh(vertices= vertices, faces= faces)
 print("Visualizing original 3D mesh:")
@@ -45,7 +45,6 @@ unfolder = Unfolder(mesh)
 tree = unfolder.steepest_edge_unfolder()
 unfolder.unfold_mesh_along_tree(tree)
 # unfolder.mesh_2d.visualize()
-print(unfolder.mesh_2d.polygons)
 collisions = unfolder.mesh_2d.count_collisions()
 print(f"number of collisions {(collisions)} ")
 

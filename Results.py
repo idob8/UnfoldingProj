@@ -148,19 +148,47 @@ def visualize_mesh_transformations(mesh_path, mesh_name, n_iterations, transform
     plt.tight_layout()
     plt.savefig(os.path.join(results_path, f'{mesh_name}_{transformation_method}_transformations.png'))
     plt.close(fig)
-    
-# '''Preform MCF transformation'''
-# mesh_path = "/Users/meravkeidar/OneDrive/Technion/semester4/DGP/DigitalGeometryProcessing/HW2/hw2_data/frog_s3.off"
-# mesh_name = "frog"
-# results_path = "/Users/meravkeidar/OneDrive/Technion/semester4/DGP/project/Results/MCF/frog"
-# n_iterations = 5
-# mcf_params = {'n_iterations': 1, 'step_size': 0.001}
-# visualize_mesh_transformations(mesh_path, mesh_name, n_iterations, "MCF", mcf_params, results_path)
 
-# '''Preform ENAF transformation'''
-# results_path = "/Users/meravkeidar/OneDrive/Technion/semester4/DGP/project/Results/ENAF/frog"
-# enaf_params = {'n_iterations': 1, 'step_size': 0.001}
-# visualize_mesh_transformations(mesh_path, mesh_name, n_iterations, "ENAF", enaf_params, results_path)
+##########################################################################################################################
+
+'''Unfold a sphere'''
+mesh_path = "/Users/meravkeidar/OneDrive/Technion/semester4/DGP/DigitalGeometryProcessing/HW2/hw2_data/sphere_s0.off"
+mesh_name = "sphere"
+results_path = "/Users/meravkeidar/OneDrive/Technion/semester4/DGP/project/Results/sphere"
+os.makedirs(results_path, exist_ok=True)
+mesh = Mesh()
+mesh.read_off(mesh_path)
+unfolder = Unfolder(mesh)
+
+tree_steepest = unfolder.steepest_edge_unfolder()
+unfolder.unfold_mesh_along_tree(tree_steepest)
+collisions_steepest = unfolder.mesh_2d.count_collisions()
+# Save the steepest edge unfolding result
+save_2d_unfolding(unfolder.mesh_2d, 
+                      os.path.join(results_path, f'{mesh_name}_steepest_edge_unfolding.png'),
+                      'Steepest Edge Unfolding',
+                      0,  # iteration
+                      mesh_name,
+                      collisions_steepest)
+
+print(f"Steepest Edge Unfolding - Collisions: {collisions_steepest}")
+
+##########################################################################################################################
+
+'''Preform MCF transformation'''
+mesh_path = "/Users/meravkeidar/OneDrive/Technion/semester4/DGP/DigitalGeometryProcessing/HW2/hw2_data/frog_s3.off"
+mesh_name = "frog"
+results_path = "/Users/meravkeidar/OneDrive/Technion/semester4/DGP/project/Results/MCF/frog"
+n_iterations = 5
+mcf_params = {'n_iterations': 1, 'step_size': 0.001}
+visualize_mesh_transformations(mesh_path, mesh_name, n_iterations, "MCF", mcf_params, results_path)
+
+'''Preform ENAF transformation'''
+results_path = "/Users/meravkeidar/OneDrive/Technion/semester4/DGP/project/Results/ENAF/frog"
+enaf_params = {'n_iterations': 1, 'step_size': 0.001}
+visualize_mesh_transformations(mesh_path, mesh_name, n_iterations, "ENAF", enaf_params, results_path)
+
+##########################################################################################################################
 
 '''Iteratevly transform mesh, find unfolding and collisions '''
 mesh_path = "/Users/meravkeidar/OneDrive/Technion/semester4/DGP/DigitalGeometryProcessing/HW2/hw2_data/phands.off"
