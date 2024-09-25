@@ -18,10 +18,16 @@ class Mesh2D:
 
     def compute_bounding_box(self, face_index):
         vertices = list(self.polygons[face_index].values())
+        if len(vertices) < 3:
+            print(f"Warning: Face {face_index} has fewer than 3 vertices")
+            return
         x_coords = [v[0] for v in vertices]
         y_coords = [v[1] for v in vertices]
         min_x, max_x = min(x_coords), max(x_coords)
         min_y, max_y = min(y_coords), max(y_coords)
+        if min_x == max_x and min_y == max_y:
+            print(f"Warning: Face {face_index} is degenerate")
+            self.bounding_boxes[face_index] = None
         self.bounding_boxes[face_index] = (
             np.array([min_x, min_y]),
             np.array([max_x, max_y])
@@ -45,6 +51,7 @@ class Mesh2D:
     def count_collisions(self):
         collision_count = 0
         for i in range(len(self.polygons)):
+            self.compute_bounding_box(i)
             for j in range(i + 1, len(self.polygons)):
                 if(self.faces_overlap(i, j)):
                     collision_count += 1            
@@ -112,7 +119,11 @@ class Mesh2D:
         return shared_vertices
 
     def faces_overlap(self, face_index1, face_index2):
-        if(not self.bounding_boxes_intersect(face_index1, face_index2)): return False
+        if (self.bounding_boxes[face_index1] == None or self.bounding_boxes[face_index2] == None): 
+            return False # Degenerate face
+        
+        if(not self.bounding_boxes_intersect(face_index1, face_index2)): 
+            return False
 
         # Check if triangles share an edge
         shared_vertices = self.find_shared_vertices(face_index1, face_index2)
