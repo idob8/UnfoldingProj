@@ -5,6 +5,7 @@ from Tree import Tree
 import heapq
 from Mesh import Mesh
 import random
+epsilon = 1e-7
 
 class Mesh2D:
     def __init__(self):
@@ -49,40 +50,33 @@ class Mesh2D:
                     collision_count += 1            
         return collision_count
     
-    def orientation(self, p, q, r):
-        val = (q[1] - p[1]) * (r[0] - q[0]) - (q[0] - p[0]) * (r[1] - q[1])
-        if abs(val) < 1e-8:  
-            return 0  # Collinear
-        return 1 if val > 0 else -1
-
-    def on_segment(self, p, q, r):
-        return (min(p[0], q[0]) <= r[0] <= max(p[0], q[0]) and
-                min(p[1], q[1]) <= r[1] <= max(p[1], q[1]))
-
-    def line_intersect(self, p1, q1, p2, q2):
-        o1 = self.orientation(p1, q1, p2)
-        o2 = self.orientation(p1, q1, q2)
-        o3 = self.orientation(p2, q2, p1)
-        o4 = self.orientation(p2, q2, q1)
-
-        # General case
-        if o1 != o2 and o3 != o4:
-            return True
-        # Special Cases
-        if o1 == 0 and self.on_segment(p1, q1, p2): return True
-        if o2 == 0 and self.on_segment(p1, q1, q2): return True
-        if o3 == 0 and self.on_segment(p2, q2, p1): return True
-        if o4 == 0 and self.on_segment(p2, q2, q1): return True
-
-        return False
+    def line_intersect(self, v1, v2, v3, v4):
+        x = (v4[1] - v3[1]) * (v2[0] - v1[0]) - (v4[0] - v3[0]) * (v2[1] - v1[1])
+        y = (v4[0] - v3[0]) * (v1[1] - v3[1]) - (v4[1] - v3[1]) * (v1[0] - v3[0])
+        z = (v2[0] - v1[0]) * (v1[1] - v3[1]) - (v2[1] - v1[1]) * (v1[0] - v3[0])
+        if x < 0:
+            x, y, z = -x, -y, -z
+        return ((0 + epsilon) <= y <= (x - epsilon)) and ((0 + epsilon) <= z <= (x - epsilon))
 
     def point_inside_triangle(self, p, triangle):
-        a, b, c = triangle
-        area = abs(self.orientation(a, b, c))
-        area1 = abs(self.orientation(p, b, c))
-        area2 = abs(self.orientation(a, p, c))
-        area3 = abs(self.orientation(a, b, p))
-        return abs(area - (area1 + area2 + area3)) < 1e-5
+        a, b ,c = triangle
+        a = np.array(a)
+        b = np.array(b)
+        c = np.array(c)
+        p = np.array(p)
+        
+        def cross2D(u, v):
+            return u[0] * v[1] - u[1] * v[0]
+        
+        x = cross2D(p - a, c - a)
+        y = cross2D(b - a, p - a)
+        z = cross2D(b - a, c - a)
+        
+        if z < 0:
+            x, y, z = -x, -y, -z
+        
+        return x >= (0 + epsilon) and y >= (0 + epsilon) and (x + y) <= (z - epsilon)
+
         
     def bounding_boxes_intersect(self, face_index1, face_index2):
             (min1_x, min1_y), (max1_x, max1_y) = self.bounding_boxes[face_index1]
@@ -99,42 +93,23 @@ class Mesh2D:
         p1 = list(set(self.polygons[face_index1].keys()) - set(shared_vertices))[0]
         p2 = list(set(self.polygons[face_index2].keys()) - set(shared_vertices))[0]
 
-        # Check if the line segment (p1, p2) intersects with the shared edge (v1, v2) -
+        # Check if the line segment (p1, p2) intersects with the shared edge (v1, v2):
         # if they do -  each third point is on the other side of the shared edge - the faces do not collide
         # if they dont -  both third points are on the same side of the shared edge - the faces collide
         return not (self.line_intersect(self.polygons[face_index1][p1], self.polygons[face_index2][p2],
                                    self.polygons[face_index1][v1], self.polygons[face_index1][v2]))
 
-        # # Get the shared edge vertices
-        # v1, v2 = shared_vertices
-        
-        # # Get the non-shared vertex for each triangle
-        # p1 = list(set(self.polygons[face_index1].keys()) - set(shared_vertices))[0]
-        # p2 = list(set(self.polygons[face_index2].keys()) - set(shared_vertices))[0]
-        
-        # # Get 2D coordinates
-        # v1_coord = self.polygons[face_index1][v1]
-        # v2_coord = self.polygons[face_index1][v2]
-        # p1_coord = self.polygons[face_index1][p1]
-        # p2_coord = self.polygons[face_index2][p2]
-        
-        # # Use the orientation function to determine if p1 and p2 are on the same side of the edge
-        # o1 = self.orientation(v1_coord, v2_coord, p1_coord)
-        # o2 = self.orientation(v1_coord, v2_coord, p2_coord)
-        
-        # # If orient1 and orient2 have the same sign, the points are on the same side
-        # return o1 * o2 > 0
 
     def faces_overlap(self, face_index1, face_index2):
         if(not self.bounding_boxes_intersect(face_index1, face_index2)): return False
 
         # Check if triangles share an edge
-        shared_vertices_3d = (set(self.polygons[face_index1].keys()) & set(self.polygons[face_index2].keys()))
-        if(len(shared_vertices_3d) == 2):
-            return self.shared_edge_overlap(face_index1, face_index2, shared_vertices_3d)
+        shared_vertices = (set(self.polygons[face_index1].keys()) & set(self.polygons[face_index2].keys()))
+        if(len(shared_vertices) == 2):
+            return self.shared_edge_overlap(face_index1, face_index2, shared_vertices)
         
         #faces completly overlap
-        if(len(shared_vertices_3d) == 3):
+        if(len(shared_vertices) == 3):
             return True
         
         face1_2d = list(self.polygons[face_index1].values())
