@@ -99,14 +99,26 @@ class Mesh2D:
         return not (self.line_intersect(self.polygons[face_index1][p1], self.polygons[face_index2][p2],
                                    self.polygons[face_index1][v1], self.polygons[face_index1][v2]))
 
+    def find_shared_vertices(self, face_index1, face_index2):
+        shared_vertices = []
+        vertices1 = self.polygons[face_index1]
+        vertices2 = self.polygons[face_index2]
+        
+        for v1, coord1 in vertices1.items():
+            for v2, coord2 in vertices2.items():
+                if np.allclose(coord1, coord2, atol=epsilon):
+                    shared_vertices.append((v1, v2))
+        
+        return shared_vertices
 
     def faces_overlap(self, face_index1, face_index2):
         if(not self.bounding_boxes_intersect(face_index1, face_index2)): return False
 
         # Check if triangles share an edge
-        shared_vertices = (set(self.polygons[face_index1].keys()) & set(self.polygons[face_index2].keys()))
+        shared_vertices = self.find_shared_vertices(face_index1, face_index2)
         if(len(shared_vertices) == 2):
-            return self.shared_edge_overlap(face_index1, face_index2, shared_vertices)
+            shared_vertices_face1 = [v[0] for v in shared_vertices]
+            return self.shared_edge_overlap(face_index1, face_index2, shared_vertices_face1)
         
         #faces completly overlap
         if(len(shared_vertices) == 3):
